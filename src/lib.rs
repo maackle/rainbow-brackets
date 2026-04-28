@@ -6,9 +6,9 @@
 //! # Example
 //!
 //! ```
-//! use rainbow_brackets::{RainbowBrackets, Color};
+//! use rainbow_brackets::{RainbowBracketsConfig};
 //!
-//! let rb = RainbowBrackets::default();
+//! let rb = RainbowBracketsConfig::default();
 //! let colored = rb.colorize("fn foo(a: Vec<u8>, b: (i32, i32)) {}");
 //! println!("{}", colored);
 //! ```
@@ -593,8 +593,8 @@ mod tests {
         //   `a`, inner `(`, inner `)`, `c` → Red (depth-1 zone)
         //   `b` → Green (depth-2 zone)
         let result = rb.colorize("(a(b)c)");
-        assert!(result.starts_with('('));       // outer `(` uncolored
-        assert!(result.ends_with(')'));         // outer `)` uncolored
+        assert!(result.starts_with('(')); // outer `(` uncolored
+        assert!(result.ends_with(')')); // outer `)` uncolored
         assert!(result.contains("\x1b[31ma")); // `a` → Red
         assert!(result.contains("\x1b[31m(")); // inner `(` → Red (in the Red zone)
         assert!(result.contains("\x1b[32mb")); // `b` → Green
