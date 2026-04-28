@@ -94,14 +94,10 @@ impl Default for RainbowBracketsConfig {
     fn default() -> Self {
         Self {
             colors: vec![
-                Color::BrightYellow,
-                Color::BrightMagenta,
                 Color::BrightCyan,
-                Color::BrightGreen,
-                Color::Yellow,
-                Color::Magenta,
-                Color::Cyan,
-                Color::Green,
+                Color::BrightMagenta,
+                Color::BrightYellow,
+                Color::BrightBlack,
             ],
             pairs: vec![
                 BracketPair::new('(', ')'),
