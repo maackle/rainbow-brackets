@@ -20,20 +20,20 @@ fn main() {
         y: Some((Box::new(Foo::default()), Box::new(Foo::default()))),
     };
 
-    let colorized = (&foo).rainbow_brackets();
+    let colorized = foo.rainbow_brackets();
     println!("{:?}", colorized);
     println!("{:#?}", colorized);
 
     println!(
         "{:?}",
-        (&foo).rainbow_brackets_with(RainbowBracketsConfig {
+        foo.rainbow_brackets_with(&RainbowBracketsConfig {
             mode: Mode::InnerText,
             ..Default::default()
         })
     );
     println!(
         "{:?}",
-        (&foo).rainbow_brackets_with(RainbowBracketsConfig {
+        foo.rainbow_brackets_with(&RainbowBracketsConfig {
             mode: Mode::OuterText,
             ..Default::default()
         })

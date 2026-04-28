@@ -226,17 +226,17 @@ pub trait RainbowBrackets
 where
     Self: Sized,
 {
-    fn rainbow_brackets(self) -> RainbowBracketed<Self> {
+    fn rainbow_brackets(&self) -> RainbowBracketed<'_, Self> {
         RainbowBracketed {
             inner: self,
             config: RainbowBracketsConfig::default(),
         }
     }
 
-    fn rainbow_brackets_with(self, config: RainbowBracketsConfig) -> RainbowBracketed<Self> {
+    fn rainbow_brackets_with(&self, config: &RainbowBracketsConfig) -> RainbowBracketed<'_, Self> {
         RainbowBracketed {
             inner: self,
-            config,
+            config: config.clone(),
         }
     }
 }
@@ -244,12 +244,12 @@ where
 impl<T> RainbowBrackets for T where T: std::fmt::Debug {}
 
 #[derive(Clone)]
-pub struct RainbowBracketed<T> {
-    inner: T,
+pub struct RainbowBracketed<'a, T> {
+    inner: &'a T,
     config: RainbowBracketsConfig,
 }
 
-impl<T> std::ops::Deref for RainbowBracketed<T> {
+impl<T> std::ops::Deref for RainbowBracketed<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -257,7 +257,7 @@ impl<T> std::ops::Deref for RainbowBracketed<T> {
     }
 }
 
-impl<T> std::fmt::Display for RainbowBracketed<T>
+impl<T> std::fmt::Display for RainbowBracketed<'_, T>
 where
     T: std::fmt::Display,
 {
@@ -266,7 +266,7 @@ where
     }
 }
 
-impl<T> std::fmt::Debug for RainbowBracketed<T>
+impl<T> std::fmt::Debug for RainbowBracketed<'_, T>
 where
     T: std::fmt::Debug,
 {
@@ -514,7 +514,7 @@ mod tests {
             pairs: vec![],
             ..Default::default()
         };
-        let wrapped = NoBrack { a: true }.rainbow_brackets_with(rb);
+        let wrapped = NoBrack { a: true }.rainbow_brackets_with(&rb);
         let output = format!("{:?}", wrapped);
         // NoBrack { a: true } — curly braces appear, but since pairs is empty
         // none of them should be colorized.
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn trait_deref() {
         let pt = Point { x: 10, y: 20 };
-        let wrapped = pt.clone().rainbow_brackets();
+        let wrapped = pt.rainbow_brackets();
         assert_eq!(wrapped.x, pt.x);
         assert_eq!(wrapped.y, pt.y);
     }
