@@ -1,4 +1,4 @@
-use rainbow_brackets::{RainbowBrackets, RainbowBracketsConfig};
+use rainbow_brackets::{Mode, RainbowBrackets, RainbowBracketsConfig};
 
 fn main() {
     let rb = RainbowBracketsConfig::default();
@@ -24,10 +24,18 @@ fn main() {
     println!("{:?}", colorized);
     println!("{:#?}", colorized);
 
-    let full_colorized = foo.rainbow_brackets_with(RainbowBracketsConfig {
-        colored_text: true,
-        ..Default::default()
-    });
-    println!("{:?}", full_colorized);
-    println!("{:#?}", full_colorized);
+    println!(
+        "{:?}",
+        (&foo).rainbow_brackets_with(RainbowBracketsConfig {
+            mode: Mode::InnerText,
+            ..Default::default()
+        })
+    );
+    println!(
+        "{:?}",
+        (&foo).rainbow_brackets_with(RainbowBracketsConfig {
+            mode: Mode::OuterText,
+            ..Default::default()
+        })
+    );
 }

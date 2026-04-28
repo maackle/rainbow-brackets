@@ -78,6 +78,22 @@ impl BracketPair {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    /// Only colorize brackets.
+    BracketsOnly,
+    /// Color text between brackets the same as the outermost bracket.
+    OuterText,
+    /// Color text between brackets the same as the innermost bracket.
+    InnerText,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Self::BracketsOnly
+    }
+}
+
 /// Colorizes bracket pairs in a string by nesting depth.
 ///
 /// Each depth level cycles through the configured `colors`. Non-bracket characters
@@ -89,8 +105,8 @@ pub struct RainbowBracketsConfig {
     pub colors: Vec<Color>,
     /// Bracket pairs to colorize.
     pub pairs: Vec<BracketPair>,
-    /// When true, text between brackets is colored to match the enclosing bracket pair.
-    pub colored_text: bool,
+    /// Mode to use for coloring text between brackets.
+    pub mode: Mode,
 }
 
 impl Default for RainbowBracketsConfig {
@@ -109,14 +125,18 @@ impl Default for RainbowBracketsConfig {
                 BracketPair::new('<', '>'),
                 BracketPair::new('⟪', '⟫'),
             ],
-            colored_text: false,
+            mode: Mode::BracketsOnly,
         }
     }
 }
 
 impl RainbowBracketsConfig {
-    pub fn new(colors: Vec<Color>, pairs: Vec<BracketPair>) -> Self {
-        Self { colors, pairs, colored_text: false }
+    pub fn new(colors: Vec<Color>, pairs: Vec<BracketPair>, mode: Mode) -> Self {
+        Self {
+            colors,
+            pairs,
+            mode,
+        }
     }
 
     /// Returns the colorized string with ANSI escape codes.
@@ -134,32 +154,67 @@ impl RainbowBracketsConfig {
 
         for ch in input.chars() {
             if let Some(pair) = self.pairs.iter().find(|p| p.open == ch) {
-                let color = &self.colors[depth % self.colors.len()];
-                out.push_str(&color.ansi_fg());
-                out.push(ch);
-                out.push_str(RESET);
+                // OuterText: the bracket lives in the outer zone (before opening), so
+                // depth-0 brackets are uncolored and deeper ones use the outer zone's color.
+                let open_colored = match self.mode {
+                    Mode::OuterText => depth > 0,
+                    _ => true,
+                };
+                if open_colored {
+                    let idx = match self.mode {
+                        Mode::OuterText => (depth - 1) % self.colors.len(),
+                        _ => depth % self.colors.len(),
+                    };
+                    out.push_str(&self.colors[idx].ansi_fg());
+                    out.push(ch);
+                    out.push_str(RESET);
+                } else {
+                    out.push(ch);
+                }
                 stack.push((depth, pair.close));
                 depth += 1;
             } else if self.pairs.iter().any(|p| p.close == ch) {
                 // Check if this closes the innermost open bracket.
                 if stack.last().map(|(_, c)| *c) == Some(ch) {
                     let (open_depth, _) = stack.pop().unwrap();
+                    let (close_colored, idx) = match self.mode {
+                        // InnerText: close bracket uses the inner depth (before restoring).
+                        Mode::InnerText => (true, depth % self.colors.len()),
+                        // OuterText: bracket lives in the outer zone (after closing);
+                        // returning to depth 0 means no color.
+                        Mode::OuterText if open_depth == 0 => (false, 0),
+                        Mode::OuterText => (true, (open_depth - 1) % self.colors.len()),
+                        Mode::BracketsOnly => (true, open_depth % self.colors.len()),
+                    };
                     depth = open_depth;
-                    let color = &self.colors[depth % self.colors.len()];
-                    out.push_str(&color.ansi_fg());
-                    out.push(ch);
-                    out.push_str(RESET);
+                    if close_colored {
+                        out.push_str(&self.colors[idx].ansi_fg());
+                        out.push(ch);
+                        out.push_str(RESET);
+                    } else {
+                        out.push(ch);
+                    }
                 } else {
                     // Mismatched — emit as-is.
                     out.push(ch);
                 }
-            } else if self.colored_text && depth > 0 {
-                let color = &self.colors[(depth - 1) % self.colors.len()];
-                out.push_str(&color.ansi_fg());
-                out.push(ch);
-                out.push_str(RESET);
             } else {
-                out.push(ch);
+                match self.mode {
+                    Mode::BracketsOnly => out.push(ch),
+                    Mode::OuterText if depth > 0 => {
+                        let color = &self.colors[(depth - 1) % self.colors.len()];
+                        out.push_str(&color.ansi_fg());
+                        out.push(ch);
+                        out.push_str(RESET);
+                    }
+                    Mode::InnerText if depth > 0 => {
+                        let color = &self.colors[depth % self.colors.len()];
+                        out.push_str(&color.ansi_fg());
+                        out.push(ch);
+                        out.push_str(RESET);
+                    }
+                    _ => out.push(ch),
+                }
             }
         }
 
@@ -490,71 +545,135 @@ mod tests {
         assert!(debug_out.contains('"'));
     }
 
-    // --- colored_text mode ---
+    // --- Mode tests ---
 
-    // With colored_text enabled, text inside brackets is colored to match the enclosing pair.
+    // OuterText: depth-0 brackets are uncolored; only the text inside is colored.
     #[test]
-    fn colored_text_basic() {
+    fn outer_text_basic() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
-            colored_text: true,
+            mode: Mode::OuterText,
             ..Default::default()
         };
-        // `(hi)` — both `h` and `i` should carry the Red escape.
+        // `(hi)` — `(` and `)` are at depth 0 (uncolored); `h` and `i` get Red.
         let result = rb.colorize("(hi)");
-        assert_eq!(result.matches("\x1b[31m").count(), 4); // (, h, i, )
+        assert_eq!(result.matches("\x1b[31m").count(), 2);
+        assert!(result.starts_with('('));
+        assert!(result.ends_with(')'));
     }
 
-    // Text outside all brackets is never colored even with colored_text enabled.
+    // OuterText: text outside all brackets is never colored.
     #[test]
-    fn colored_text_outside_brackets_uncolored() {
+    fn outer_text_outside_brackets_uncolored() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
-            colored_text: true,
+            mode: Mode::OuterText,
             ..Default::default()
         };
         let result = rb.colorize("a(b)c");
-        // Leading `a` and trailing `c` are at depth 0 — no color.
         assert!(result.starts_with('a'));
         assert!(result.ends_with('c'));
-        // `b` inside the brackets does get a color escape.
         assert!(result.contains("\x1b[31mb"));
     }
 
-    // Nested brackets switch text color at each depth boundary.
+    // OuterText: nested brackets — brackets and text use the color of the zone they sit in.
+    // The outermost `(` and `)` are uncolored; inner brackets take the surrounding zone's color.
     #[test]
-    fn colored_text_nested_color_change() {
+    fn outer_text_nested_color_change() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
             pairs: vec![BracketPair::new('(', ')')],
-            colored_text: true,
+            mode: Mode::OuterText,
             ..Default::default()
         };
         // `(a(b)c)`:
-        //   `a` and `c` → depth 1 → Red (colors[0])
-        //   `b`          → depth 2 → Green (colors[1])
+        //   outer `(` / `)` → uncolored (depth-0 zone)
+        //   `a`, inner `(`, inner `)`, `c` → Red (depth-1 zone)
+        //   `b` → Green (depth-2 zone)
         let result = rb.colorize("(a(b)c)");
-        assert!(result.contains("\x1b[31ma")); // `a` in Red
-        assert!(result.contains("\x1b[32mb")); // `b` in Green
-        assert!(result.contains("\x1b[31mc")); // `c` back to Red
+        assert!(result.starts_with('('));       // outer `(` uncolored
+        assert!(result.ends_with(')'));         // outer `)` uncolored
+        assert!(result.contains("\x1b[31ma")); // `a` → Red
+        assert!(result.contains("\x1b[31m(")); // inner `(` → Red (in the Red zone)
+        assert!(result.contains("\x1b[32mb")); // `b` → Green
+        assert!(result.contains("\x1b[31m)")); // inner `)` → Red (returns to Red zone)
+        assert!(result.contains("\x1b[31mc")); // `c` → Red
     }
 
-    // colored_text: false (default) leaves text chars uncolored.
+    // BracketsOnly (default) leaves text chars uncolored.
     #[test]
-    fn colored_text_false_leaves_text_plain() {
+    fn brackets_only_leaves_text_plain() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
-            ..Default::default() // colored_text: false
+            ..Default::default() // mode: BracketsOnly
         };
         let result = rb.colorize("(hi)");
-        // Only the two bracket characters themselves carry a color escape.
         assert_eq!(result.matches("\x1b[31m").count(), 2);
-        // The text `hi` appears as plain characters without any preceding escape.
         assert!(result.contains("hi"));
         assert!(!result.contains("\x1b[31mh"));
+    }
+
+    // InnerText: text inside brackets is colored with the inner (current) depth's color,
+    // and the closing bracket shares that inner color.
+    #[test]
+    fn inner_text_basic() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red, Color::Green],
+            pairs: vec![BracketPair::new('(', ')')],
+            mode: Mode::InnerText,
+            ..Default::default()
+        };
+        // `(hi)`: `(` at depth 0 → Red; text at depth 1 → Green; `)` uses inner depth 1 → Green.
+        let result = rb.colorize("(hi)");
+        assert!(result.contains("\x1b[31m(")); // open bracket → Red (depth 0)
+        assert!(result.contains("\x1b[32mh")); // `h` → Green (depth 1)
+        assert!(result.contains("\x1b[32mi")); // `i` → Green
+        assert!(result.contains("\x1b[32m)")); // close bracket → Green (inner depth 1)
+    }
+
+    // InnerText: text outside all brackets is never colored.
+    #[test]
+    fn inner_text_outside_brackets_uncolored() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red, Color::Green],
+            pairs: vec![BracketPair::new('(', ')')],
+            mode: Mode::InnerText,
+            ..Default::default()
+        };
+        let result = rb.colorize("a(b)c");
+        assert!(result.starts_with('a'));
+        assert!(result.ends_with('c'));
+        assert!(result.contains("\x1b[32mb")); // `b` at depth 1 → Green
+    }
+
+    // InnerText: nested — text color matches the depth it sits at, and each close bracket
+    // carries the inner color rather than the outer.
+    #[test]
+    fn inner_text_nested_color_change() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red, Color::Green, Color::Blue],
+            pairs: vec![BracketPair::new('(', ')')],
+            mode: Mode::InnerText,
+            ..Default::default()
+        };
+        // `(a(b)c)`:
+        //   `(` at depth 0 → Red
+        //   `a` at depth 1 → Green
+        //   `(` at depth 1 → Green
+        //   `b` at depth 2 → Blue
+        //   `)` closing depth 2→1 → Blue (inner)
+        //   `c` at depth 1 → Green
+        //   `)` closing depth 1→0 → Green (inner)
+        let result = rb.colorize("(a(b)c)");
+        assert!(result.contains("\x1b[31m(")); // outer `(` → Red
+        assert!(result.contains("\x1b[32ma")); // `a` → Green
+        assert!(result.contains("\x1b[34mb")); // `b` → Blue
+        assert!(result.contains("\x1b[34m)")); // inner `)` → Blue
+        assert!(result.contains("\x1b[32mc")); // `c` → Green
+        assert!(result.contains("\x1b[32m)")); // outer `)` → Green
     }
 
     // A close character that is a close in *some* pair but not the one currently open
