@@ -104,7 +104,7 @@ pub struct RainbowBracketsConfig {
     /// Colors used for each nesting depth, cycling if depth exceeds the list length.
     pub colors: Vec<Color>,
     /// Bracket pairs to colorize.
-    pub pairs: Vec<BracketPair>,
+    pub brackets: Vec<BracketPair>,
     /// Mode to use for coloring text between brackets.
     pub mode: Mode,
 }
@@ -118,7 +118,7 @@ impl Default for RainbowBracketsConfig {
                 Color::BrightYellow,
                 Color::BrightBlack,
             ],
-            pairs: vec![
+            brackets: vec![
                 BracketPair::new('(', ')'),
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
@@ -131,12 +131,27 @@ impl Default for RainbowBracketsConfig {
 }
 
 impl RainbowBracketsConfig {
-    pub fn new(colors: Vec<Color>, pairs: Vec<BracketPair>, mode: Mode) -> Self {
+    pub fn new(colors: Vec<Color>, brackets: Vec<BracketPair>, mode: Mode) -> Self {
         Self {
             colors,
-            pairs,
+            brackets,
             mode,
         }
+    }
+
+    pub fn colors(self, colors: Vec<Color>) -> Self {
+        Self { colors, ..self }
+    }
+
+    pub fn brackets(self, pairs: Vec<BracketPair>) -> Self {
+        Self {
+            brackets: pairs,
+            ..self
+        }
+    }
+
+    pub fn mode(self, mode: Mode) -> Self {
+        Self { mode, ..self }
     }
 
     /// Returns the colorized string with ANSI escape codes.
@@ -153,7 +168,7 @@ impl RainbowBracketsConfig {
         let mut out = String::with_capacity(input.len() + input.len() / 4);
 
         for ch in input.chars() {
-            if let Some(pair) = self.pairs.iter().find(|p| p.open == ch) {
+            if let Some(pair) = self.brackets.iter().find(|p| p.open == ch) {
                 // OuterText: the bracket lives in the outer zone (before opening), so
                 // depth-0 brackets are uncolored and deeper ones use the outer zone's color.
                 let open_colored = match self.mode {
@@ -173,7 +188,7 @@ impl RainbowBracketsConfig {
                 }
                 stack.push((depth, pair.close));
                 depth += 1;
-            } else if self.pairs.iter().any(|p| p.close == ch) {
+            } else if self.brackets.iter().any(|p| p.close == ch) {
                 // Check if this closes the innermost open bracket.
                 if stack.last().map(|(_, c)| *c) == Some(ch) {
                     let (open_depth, _) = stack.pop().unwrap();
@@ -300,7 +315,7 @@ mod tests {
     fn single_pair() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("(x)");
@@ -312,7 +327,7 @@ mod tests {
     fn nested_pairs_use_different_colors() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("((x))");
@@ -325,7 +340,7 @@ mod tests {
     fn colors_cycle() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         // Three levels all use Red since there's only one color.
@@ -337,7 +352,7 @@ mod tests {
     fn mismatched_bracket_passed_through() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+            brackets: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
             ..Default::default()
         };
         // `(]` — the `]` doesn't match `(`, should be emitted raw.
@@ -351,7 +366,7 @@ mod tests {
     fn multiple_bracket_types() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green, Color::Blue],
-            pairs: vec![
+            brackets: vec![
                 BracketPair::new('(', ')'),
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
@@ -369,7 +384,7 @@ mod tests {
     fn rgb_color() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Rgb(255, 128, 0)],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("(x)");
@@ -381,7 +396,7 @@ mod tests {
     fn wrong_close_bracket_is_plain() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
-            pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+            brackets: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
             ..Default::default()
         };
         // `([)]` — the `)` at position 2 doesn't match the innermost `[`, so it's raw.
@@ -400,7 +415,7 @@ mod tests {
     fn unclosed_open_bracket() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("(x");
@@ -415,7 +430,7 @@ mod tests {
     fn orphan_close_bracket() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("x)y");
@@ -429,7 +444,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             // Only round brackets configured; square and curly are not.
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         let result = rb.colorize("[x]{y}");
@@ -511,7 +526,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             // No bracket pairs configured.
-            pairs: vec![],
+            brackets: vec![],
             ..Default::default()
         };
         let wrapped = NoBrack { a: true }.rainbow_brackets_with(&rb);
@@ -552,7 +567,7 @@ mod tests {
     fn outer_text_basic() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::OuterText,
             ..Default::default()
         };
@@ -568,7 +583,7 @@ mod tests {
     fn outer_text_outside_brackets_uncolored() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::OuterText,
             ..Default::default()
         };
@@ -584,7 +599,7 @@ mod tests {
     fn outer_text_nested_color_change() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::OuterText,
             ..Default::default()
         };
@@ -607,7 +622,7 @@ mod tests {
     fn brackets_only_leaves_text_plain() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default() // mode: BracketsOnly
         };
         let result = rb.colorize("(hi)");
@@ -622,7 +637,7 @@ mod tests {
     fn inner_text_basic() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::InnerText,
             ..Default::default()
         };
@@ -639,7 +654,7 @@ mod tests {
     fn inner_text_outside_brackets_uncolored() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::InnerText,
             ..Default::default()
         };
@@ -655,7 +670,7 @@ mod tests {
     fn inner_text_nested_color_change() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green, Color::Blue],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             mode: Mode::InnerText,
             ..Default::default()
         };
@@ -682,7 +697,7 @@ mod tests {
     fn unconfigured_close_does_not_consume_stack() {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
-            pairs: vec![BracketPair::new('(', ')')],
+            brackets: vec![BracketPair::new('(', ')')],
             ..Default::default()
         };
         // `[` is not a configured open, so it's plain; `)` correctly closes `(`.
