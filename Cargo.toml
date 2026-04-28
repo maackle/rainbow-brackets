@@ -1,0 +1,7 @@
+[package]
+name = "rainbow-brackets"
+version = "0.1.0"
+edition = "2021"
+description = "Colorize matching bracket pairs with ANSI terminal colors by nesting depth"
+
+[dev-dependencies]
