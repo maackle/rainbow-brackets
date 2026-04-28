@@ -82,15 +82,15 @@ impl BracketPair {
 ///
 /// Each depth level cycles through the configured `colors`. Non-bracket characters
 /// are passed through unchanged with the ANSI reset applied after each bracket.
-#[derive(Debug, Clone)]
-pub struct RainbowBrackets {
+#[derive(Clone)]
+pub struct RainbowBracketsConfig {
     /// Colors used for each nesting depth, cycling if depth exceeds the list length.
     pub colors: Vec<Color>,
     /// Bracket pairs to colorize.
     pub pairs: Vec<BracketPair>,
 }
 
-impl Default for RainbowBrackets {
+impl Default for RainbowBracketsConfig {
     fn default() -> Self {
         Self {
             colors: vec![
@@ -108,12 +108,13 @@ impl Default for RainbowBrackets {
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
                 BracketPair::new('<', '>'),
+                BracketPair::new('⟪', '⟫'),
             ],
         }
     }
 }
 
-impl RainbowBrackets {
+impl RainbowBracketsConfig {
     pub fn new(colors: Vec<Color>, pairs: Vec<BracketPair>) -> Self {
         Self { colors, pairs }
     }
@@ -161,25 +162,83 @@ impl RainbowBrackets {
     }
 }
 
+pub trait RainbowBrackets
+where
+    Self: Sized,
+{
+    fn rainbow_brackets(self) -> RainbowBracketed<Self> {
+        RainbowBracketed {
+            inner: self,
+            config: RainbowBracketsConfig::default(),
+        }
+    }
+
+    fn rainbow_brackets_with(self, config: RainbowBracketsConfig) -> RainbowBracketed<Self> {
+        RainbowBracketed {
+            inner: self,
+            config,
+        }
+    }
+}
+
+impl<T> RainbowBrackets for T where T: std::fmt::Debug {}
+
+#[derive(Clone)]
+pub struct RainbowBracketed<T> {
+    inner: T,
+    config: RainbowBracketsConfig,
+}
+
+impl<T> std::ops::Deref for RainbowBracketed<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> std::fmt::Display for RainbowBracketed<T>
+where
+    T: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.config.colorize(&self.inner.to_string()))
+    }
+}
+
+impl<T> std::fmt::Debug for RainbowBracketed<T>
+where
+    T: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let plain = if f.alternate() {
+            format!("{:#?}", self.inner)
+        } else {
+            format!("{:?}", self.inner)
+        };
+        write!(f, "{}", self.config.colorize(&plain))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn empty_string() {
-        let rb = RainbowBrackets::default();
+        let rb = RainbowBracketsConfig::default();
         assert_eq!(rb.colorize(""), "");
     }
 
     #[test]
     fn no_brackets() {
-        let rb = RainbowBrackets::default();
+        let rb = RainbowBracketsConfig::default();
         assert_eq!(rb.colorize("hello world"), "hello world");
     }
 
     #[test]
     fn single_pair() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -190,7 +249,7 @@ mod tests {
 
     #[test]
     fn nested_pairs_use_different_colors() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -202,7 +261,7 @@ mod tests {
 
     #[test]
     fn colors_cycle() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -213,7 +272,7 @@ mod tests {
 
     #[test]
     fn mismatched_bracket_passed_through() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
         };
@@ -226,7 +285,7 @@ mod tests {
 
     #[test]
     fn multiple_bracket_types() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green, Color::Blue],
             pairs: vec![
                 BracketPair::new('(', ')'),
@@ -243,7 +302,7 @@ mod tests {
 
     #[test]
     fn rgb_color() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Rgb(255, 128, 0)],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -254,7 +313,7 @@ mod tests {
     // A close bracket that doesn't match the innermost open bracket is passed through as plain text.
     #[test]
     fn wrong_close_bracket_is_plain() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
             pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
         };
@@ -272,7 +331,7 @@ mod tests {
     // An unclosed open bracket should still be colorized; the missing close is simply absent.
     #[test]
     fn unclosed_open_bracket() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -286,7 +345,7 @@ mod tests {
     // A close bracket with no matching open is passed through as plain text.
     #[test]
     fn orphan_close_bracket() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
         };
@@ -298,7 +357,7 @@ mod tests {
     // Brackets not in the configured pairs must not be colorized.
     #[test]
     fn unconfigured_brackets_not_colored() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             // Only round brackets configured; square and curly are not.
             pairs: vec![BracketPair::new('(', ')')],
@@ -309,11 +368,117 @@ mod tests {
         assert_eq!(result, "[x]{y}");
     }
 
+    // --- RainbowBrackets trait / RainbowBracketed ---
+
+    #[derive(Debug, Clone)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    #[derive(Debug, Clone)]
+    #[allow(unused)]
+    struct Tree {
+        value: i32,
+        children: Vec<Tree>,
+    }
+
+    // Regular debug output contains ANSI codes on brackets.
+    #[test]
+    fn trait_compact_debug_colored() {
+        let data: Vec<Vec<i32>> = vec![vec![1, 2], vec![3, 4]];
+        let wrapped = data.rainbow_brackets();
+        let output = format!("{:?}", wrapped);
+        // Nested brackets mean at least two distinct color depths.
+        assert!(
+            output.contains('\x1b'),
+            "expected ANSI codes in compact debug"
+        );
+        // Original content is present.
+        assert!(output.contains('1'));
+        assert!(output.contains('4'));
+    }
+
+    // Pretty-printed debug output also contains ANSI codes.
+    #[test]
+    fn trait_pretty_debug_colored() {
+        let tree = Tree {
+            value: 1,
+            children: vec![
+                Tree {
+                    value: 2,
+                    children: vec![],
+                },
+                Tree {
+                    value: 3,
+                    children: vec![Tree {
+                        value: 4,
+                        children: vec![],
+                    }],
+                },
+            ],
+        };
+        let wrapped = tree.rainbow_brackets();
+        let output = format!("{:#?}", wrapped);
+        assert!(
+            output.contains('\x1b'),
+            "expected ANSI codes in pretty debug"
+        );
+        // Multi-line pretty output should have newlines.
+        assert!(output.contains('\n'));
+        assert!(output.contains('4'));
+    }
+
+    // A custom struct with no brackets in its Debug output has no ANSI codes.
+    #[test]
+    fn trait_no_brackets_no_ansi() {
+        #[derive(Debug)]
+        #[allow(unused)]
+        struct NoBrack {
+            a: bool,
+        }
+
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red],
+            // No bracket pairs configured.
+            pairs: vec![],
+        };
+        let wrapped = NoBrack { a: true }.rainbow_brackets_with(rb);
+        let output = format!("{:?}", wrapped);
+        // NoBrack { a: true } — curly braces appear, but since pairs is empty
+        // none of them should be colorized.
+        assert!(!output.contains('\x1b'));
+    }
+
+    // Deref gives access to the inner value.
+    #[test]
+    fn trait_deref() {
+        let pt = Point { x: 10, y: 20 };
+        let wrapped = pt.clone().rainbow_brackets();
+        assert_eq!(wrapped.x, pt.x);
+        assert_eq!(wrapped.y, pt.y);
+    }
+
+    // Display uses the inner value's Display impl (requires T: Display).
+    #[test]
+    fn trait_display_colored() {
+        // String implements both Debug and Display.
+        let s = String::from("hello (world)");
+        let wrapped = s.rainbow_brackets();
+        let display_out = format!("{}", wrapped);
+        let debug_out = format!("{:?}", wrapped);
+        // Display path colorizes the raw string value.
+        assert!(display_out.contains('\x1b'));
+        // Debug path wraps in quotes and colorizes brackets inside.
+        assert!(debug_out.contains('\x1b'));
+        assert!(debug_out.contains('"'));
+    }
+
     // A close character that is a close in *some* pair but not the one currently open
     // must not consume the stack entry.
     #[test]
     fn unconfigured_close_does_not_consume_stack() {
-        let rb = RainbowBrackets {
+        let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
         };
