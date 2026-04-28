@@ -81,13 +81,16 @@ impl BracketPair {
 /// Colorizes bracket pairs in a string by nesting depth.
 ///
 /// Each depth level cycles through the configured `colors`. Non-bracket characters
-/// are passed through unchanged with the ANSI reset applied after each bracket.
+/// are passed through unchanged unless `colored_text` is enabled, in which case
+/// they are colored to match the innermost enclosing bracket pair.
 #[derive(Clone)]
 pub struct RainbowBracketsConfig {
     /// Colors used for each nesting depth, cycling if depth exceeds the list length.
     pub colors: Vec<Color>,
     /// Bracket pairs to colorize.
     pub pairs: Vec<BracketPair>,
+    /// When true, text between brackets is colored to match the enclosing bracket pair.
+    pub colored_text: bool,
 }
 
 impl Default for RainbowBracketsConfig {
@@ -106,13 +109,14 @@ impl Default for RainbowBracketsConfig {
                 BracketPair::new('<', '>'),
                 BracketPair::new('⟪', '⟫'),
             ],
+            colored_text: false,
         }
     }
 }
 
 impl RainbowBracketsConfig {
     pub fn new(colors: Vec<Color>, pairs: Vec<BracketPair>) -> Self {
-        Self { colors, pairs }
+        Self { colors, pairs, colored_text: false }
     }
 
     /// Returns the colorized string with ANSI escape codes.
@@ -149,6 +153,11 @@ impl RainbowBracketsConfig {
                     // Mismatched — emit as-is.
                     out.push(ch);
                 }
+            } else if self.colored_text && depth > 0 {
+                let color = &self.colors[(depth - 1) % self.colors.len()];
+                out.push_str(&color.ansi_fg());
+                out.push(ch);
+                out.push_str(RESET);
             } else {
                 out.push(ch);
             }
@@ -237,6 +246,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("(x)");
         assert!(result.contains("\x1b[91m") || result.contains("\x1b[31m"));
@@ -248,6 +258,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("((x))");
         // Depth 0 → Red, depth 1 → Green
@@ -260,6 +271,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         // Three levels all use Red since there's only one color.
         let result = rb.colorize("(((x)))");
@@ -271,6 +283,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+            ..Default::default()
         };
         // `(]` — the `]` doesn't match `(`, should be emitted raw.
         let result = rb.colorize("(]");
@@ -288,6 +301,7 @@ mod tests {
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
             ],
+            ..Default::default()
         };
         let result = rb.colorize("({[]})");
         // Depth 0 → Red, depth 1 → Green, depth 2 → Blue
@@ -301,6 +315,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Rgb(255, 128, 0)],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("(x)");
         assert!(result.contains("\x1b[38;2;255;128;0m"));
@@ -312,6 +327,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red, Color::Green],
             pairs: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+            ..Default::default()
         };
         // `([)]` — the `)` at position 2 doesn't match the innermost `[`, so it's raw.
         // The `]` at position 3 also doesn't match `(` (since `)` wasn't consumed), so it's raw too.
@@ -330,6 +346,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("(x");
         // The open bracket was colorized.
@@ -344,6 +361,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("x)y");
         // `)` appears but is not preceded by a color escape.
@@ -357,6 +375,7 @@ mod tests {
             colors: vec![Color::Red],
             // Only round brackets configured; square and curly are not.
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         let result = rb.colorize("[x]{y}");
         // No ANSI codes at all — `[`, `]`, `{`, `}` are all plain.
@@ -438,6 +457,7 @@ mod tests {
             colors: vec![Color::Red],
             // No bracket pairs configured.
             pairs: vec![],
+            ..Default::default()
         };
         let wrapped = NoBrack { a: true }.rainbow_brackets_with(rb);
         let output = format!("{:?}", wrapped);
@@ -470,6 +490,73 @@ mod tests {
         assert!(debug_out.contains('"'));
     }
 
+    // --- colored_text mode ---
+
+    // With colored_text enabled, text inside brackets is colored to match the enclosing pair.
+    #[test]
+    fn colored_text_basic() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red],
+            pairs: vec![BracketPair::new('(', ')')],
+            colored_text: true,
+            ..Default::default()
+        };
+        // `(hi)` — both `h` and `i` should carry the Red escape.
+        let result = rb.colorize("(hi)");
+        assert_eq!(result.matches("\x1b[31m").count(), 4); // (, h, i, )
+    }
+
+    // Text outside all brackets is never colored even with colored_text enabled.
+    #[test]
+    fn colored_text_outside_brackets_uncolored() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red],
+            pairs: vec![BracketPair::new('(', ')')],
+            colored_text: true,
+            ..Default::default()
+        };
+        let result = rb.colorize("a(b)c");
+        // Leading `a` and trailing `c` are at depth 0 — no color.
+        assert!(result.starts_with('a'));
+        assert!(result.ends_with('c'));
+        // `b` inside the brackets does get a color escape.
+        assert!(result.contains("\x1b[31mb"));
+    }
+
+    // Nested brackets switch text color at each depth boundary.
+    #[test]
+    fn colored_text_nested_color_change() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red, Color::Green],
+            pairs: vec![BracketPair::new('(', ')')],
+            colored_text: true,
+            ..Default::default()
+        };
+        // `(a(b)c)`:
+        //   `a` and `c` → depth 1 → Red (colors[0])
+        //   `b`          → depth 2 → Green (colors[1])
+        let result = rb.colorize("(a(b)c)");
+        assert!(result.contains("\x1b[31ma")); // `a` in Red
+        assert!(result.contains("\x1b[32mb")); // `b` in Green
+        assert!(result.contains("\x1b[31mc")); // `c` back to Red
+    }
+
+    // colored_text: false (default) leaves text chars uncolored.
+    #[test]
+    fn colored_text_false_leaves_text_plain() {
+        let rb = RainbowBracketsConfig {
+            colors: vec![Color::Red],
+            pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default() // colored_text: false
+        };
+        let result = rb.colorize("(hi)");
+        // Only the two bracket characters themselves carry a color escape.
+        assert_eq!(result.matches("\x1b[31m").count(), 2);
+        // The text `hi` appears as plain characters without any preceding escape.
+        assert!(result.contains("hi"));
+        assert!(!result.contains("\x1b[31mh"));
+    }
+
     // A close character that is a close in *some* pair but not the one currently open
     // must not consume the stack entry.
     #[test]
@@ -477,6 +564,7 @@ mod tests {
         let rb = RainbowBracketsConfig {
             colors: vec![Color::Red],
             pairs: vec![BracketPair::new('(', ')')],
+            ..Default::default()
         };
         // `[` is not a configured open, so it's plain; `)` correctly closes `(`.
         let result = rb.colorize("([x])");
