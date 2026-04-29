@@ -122,7 +122,7 @@ impl Default for RainbowBracketsConfig {
                 BracketPair::new('(', ')'),
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
-                BracketPair::new('<', '>'),
+                // BracketPair::new('<', '>'),
             ],
             mode: Mode::BracketsOnly,
         }
