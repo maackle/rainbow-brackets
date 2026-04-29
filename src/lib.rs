@@ -123,7 +123,6 @@ impl Default for RainbowBracketsConfig {
                 BracketPair::new('[', ']'),
                 BracketPair::new('{', '}'),
                 BracketPair::new('<', '>'),
-                BracketPair::new('⟪', '⟫'),
             ],
             mode: Mode::BracketsOnly,
         }
@@ -692,6 +691,96 @@ mod tests {
     }
 
     // A close character that is a close in *some* pair but not the one currently open
+    // Unmatched closing brackets — both orphan (empty stack) and cross-type mismatch —
+    // must never be colored regardless of mode.
+    #[test]
+    fn unmatched_close_never_colored() {
+        for mode in [Mode::BracketsOnly, Mode::OuterText, Mode::InnerText] {
+            let rb = RainbowBracketsConfig {
+                colors: vec![Color::Red, Color::Green],
+                brackets: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+                mode,
+                ..Default::default()
+            };
+
+            // Orphan `)` with nothing on the stack: must be plain.
+            let orphan = rb.colorize("x)y");
+            assert_eq!(
+                orphan,
+                "x)y",
+                "orphan close should be plain in {rb_mode:?}",
+                rb_mode = rb.mode
+            );
+
+            // `(]` — `]` is configured but doesn't match the innermost `(`.
+            // The `]` must be plain even though we're at depth 1 in InnerText/OuterText.
+            let mismatch = rb.colorize("(]");
+            assert!(
+                !mismatch.contains("\x1b[31m]"),
+                "mismatched ] must not be Red in {rb_mode:?}",
+                rb_mode = rb.mode
+            );
+            assert!(
+                !mismatch.contains("\x1b[32m]"),
+                "mismatched ] must not be Green in {rb_mode:?}",
+                rb_mode = rb.mode
+            );
+            assert!(
+                mismatch.contains(']'),
+                "mismatched ] must still appear in output"
+            );
+
+            // `((]` — mismatch at depth 2 (two opens before the wrong close).
+            let deep_mismatch = rb.colorize("((]");
+            assert!(
+                !deep_mismatch.contains("\x1b[31m]"),
+                "deep mismatched ] must not be Red in {rb_mode:?}",
+                rb_mode = rb.mode
+            );
+            assert!(
+                !deep_mismatch.contains("\x1b[32m]"),
+                "deep mismatched ] must not be Green in {rb_mode:?}",
+                rb_mode = rb.mode
+            );
+            assert!(
+                deep_mismatch.contains(']'),
+                "deep mismatched ] must still appear in output"
+            );
+
+            // `(a(b]c)d)` — mismatch at depth 2 surrounded by valid text and valid closes.
+            // The `]` must be plain, and the subsequent `)` chars must still close correctly.
+            let rb2 = RainbowBracketsConfig {
+                colors: vec![Color::Red, Color::Green, Color::Blue],
+                brackets: vec![BracketPair::new('(', ')'), BracketPair::new('[', ']')],
+                mode: rb.mode.clone(),
+                ..Default::default()
+            };
+            let nested = rb2.colorize("(a(b]c)d)");
+            assert!(
+                !nested.contains("\x1b[31m]"),
+                "] must not be Red in {rb_mode:?}",
+                rb_mode = rb2.mode
+            );
+            assert!(
+                !nested.contains("\x1b[32m]"),
+                "] must not be Green in {rb_mode:?}",
+                rb_mode = rb2.mode
+            );
+            assert!(
+                !nested.contains("\x1b[34m]"),
+                "] must not be Blue in {rb_mode:?}",
+                rb_mode = rb2.mode
+            );
+            // The two `)` closes must still appear — verify the stack wasn't corrupted.
+            assert_eq!(
+                nested.chars().filter(|&c| c == ')').count(),
+                2,
+                "both ) must appear in {rb_mode:?}",
+                rb_mode = rb2.mode
+            );
+        }
+    }
+
     // must not consume the stack entry.
     #[test]
     fn unconfigured_close_does_not_consume_stack() {
